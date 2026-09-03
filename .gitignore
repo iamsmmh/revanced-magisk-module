@@ -1,8 +1,27 @@
+# Generated APKs and modules
 *.apk
+*.apkm
+*.apks
+*.xapk
 *.zip
+
+# Builder state and logs
 /temp
 /build
-test*
 /logs
 build.md
+*.tmp
+
+# Local Morphe caches, options, and personal signing material
+/morphe-data
+/temp/morphe-data
+*.keystore
+*.jks
+*.p12
+*.pfx
+
+# Local test/config scratch files
 cmpr
+/test*
+!tests/
+!tests/**

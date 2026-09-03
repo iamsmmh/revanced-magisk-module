@@ -1,87 +1,83 @@
 #!/usr/bin/env bash
 
-set -e
+# First-run helper for Termux.  It keeps the builder checkout and its output in
+# ~/storage/downloads so APKs/modules are easy to install from Android.
+set -euo pipefail
 
-pr() { echo -e "\033[0;32m[+] ${1}\033[0m"; }
+PROJECT_NAME="morphe-module-builder"
+REPO_URL="https://github.com/iamsmmh/${PROJECT_NAME}.git"
+DOWNLOAD_DIR="$HOME/storage/downloads/${PROJECT_NAME}"
+CHECK_FILE="$HOME/.${PROJECT_NAME}-$(date '+%Y%m')"
+
+pr() { echo -e "\033[0;32m[+] ${1-}\033[0m"; }
 ask() {
-	local y
-	for ((n = 0; n < 3; n++)); do
-		pr "$1 [y/n]"
-		if read -r y; then
-			if [ "$y" = y ]; then
-				return 0
-			elif [ "$y" = n ]; then
-				return 1
-			fi
+	local answer
+	for _ in 1 2 3; do
+		pr "${1-} [y/n]"
+		if read -r answer; then
+			case "$answer" in
+				y|Y) return 0 ;;
+				n|N) return 1 ;;
+			esac
 		fi
-		pr "Asking again..."
+		pr "Please answer y or n."
 	done
 	return 1
 }
 
-pr "Ask for storage permission"
-until
-	yes | termux-setup-storage >/dev/null 2>&1
-	ls /sdcard >/dev/null 2>&1
-do sleep 1; done
-if [ ! -f ~/.rvmm_"$(date '+%Y%m')" ]; then
-	pr "Setting up environment..."
-	yes "" | pkg update -y && pkg install -y openssl git wget jq openjdk-17 zip
-	: >~/.rvmm_"$(date '+%Y%m')"
-fi
-mkdir -p /sdcard/Download/revanced-magisk-module/
+command -v termux-setup-storage >/dev/null 2>&1 || {
+	echo "Run this script inside Termux." >&2
+	exit 1
+}
 
-if [ ! -d revanced-magisk-module ]; then
-	pr "Cloning revanced-magisk-module."
-	git clone https://github.com/j-hc/revanced-magisk-module --depth 1
-	cd revanced-magisk-module
-	sed -i '/^enabled.*/d; /^\[.*\]/a enabled = false' config.toml
-	grep -q 'revanced-magisk-module' ~/.gitconfig 2>/dev/null \
-		|| git config --global --add safe.directory ~/revanced-magisk-module
+pr "Requesting shared-storage permission"
+yes | termux-setup-storage >/dev/null 2>&1 || true
+until [ -d "$HOME/storage/downloads" ]; do sleep 1; done
+
+if [ ! -f "$CHECK_FILE" ]; then
+	pr "Installing Termux dependencies"
+	pkg update -y
+	pkg install -y git jq wget openssl openjdk-21 zip unzip
+	: >"$CHECK_FILE"
+fi
+mkdir -p "$HOME/storage/downloads"
+
+if [ ! -d "$HOME/${PROJECT_NAME}/.git" ]; then
+	pr "Cloning ${PROJECT_NAME}"
+	git clone --depth 1 "$REPO_URL" "$HOME/${PROJECT_NAME}"
 else
-	cd revanced-magisk-module
-	pr "Checking for revanced-magisk-module updates"
-	git fetch
-	if git status | grep -q 'is behind\|fatal'; then
-		pr "revanced-magisk-module already is not synced with upstream."
-		pr "Cloning revanced-magisk-module. config.toml will be preserved."
-		cd ..
-		cp -f revanced-magisk-module/config.toml .
-		rm -rf revanced-magisk-module
-		git clone https://github.com/j-hc/revanced-magisk-module --recurse --depth 1
-		mv -f config.toml revanced-magisk-module/config.toml
-		cd revanced-magisk-module
-	fi
+	cd "$HOME/${PROJECT_NAME}"
+	pr "Checking for ${PROJECT_NAME} updates"
+	git pull --ff-only || pr "Local changes prevented an update; keeping the current checkout."
+fi
+cd "$HOME/${PROJECT_NAME}"
+
+mkdir -p "$DOWNLOAD_DIR"
+if [ ! -f "$DOWNLOAD_DIR/config.toml" ]; then
+	cp config.toml "$DOWNLOAD_DIR/config.toml"
 fi
 
-[ -f ~/storage/downloads/revanced-magisk-module/config.toml ] \
-	|| cp config.toml ~/storage/downloads/revanced-magisk-module/config.toml
-
-if ask "Open rvmm-config-gen to generate a config?"; then
-	am start -a android.intent.action.VIEW -d https://j-hc.github.io/rvmm-config-gen/
+if ask "Open config.toml before building?"; then
+	am start -a android.intent.action.VIEW \
+		-d "file://${DOWNLOAD_DIR}/config.toml" -t text/plain >/dev/null 2>&1 || true
+	pr "Edit ${DOWNLOAD_DIR}/config.toml, then press Enter to continue."
+	read -r
 fi
-printf "\n"
-until
-	if ask "Open 'config.toml' to configure builds?\nAll are disabled by default, you will need to enable at first time building"; then
-		am start -a android.intent.action.VIEW -d file:///sdcard/Download/revanced-magisk-module/config.toml -t text/plain
-	fi
-	ask "Setup is done. Do you want to start building?"
-do :; done
-cp -f ~/storage/downloads/revanced-magisk-module/config.toml config.toml
+cp -f "$DOWNLOAD_DIR/config.toml" config.toml
 
-./build.sh
+if ! ask "Start the Morphe build now?"; then
+	pr "Configuration saved. Run ./build.sh when you are ready."
+	exit 0
+fi
 
-cd build
-PWD=$(pwd)
-for op in *; do
-	[ "$op" = "*" ] && {
-		pr "glob fail"
-		exit 1
-	}
-	mv -f "${PWD}/${op}" ~/storage/downloads/revanced-magisk-module/"${op}"
+./build.sh config.toml
+
+for output in build/*; do
+	[ -f "$output" ] || continue
+	cp -f "$output" "$DOWNLOAD_DIR/$(basename "$output")"
 done
+cp -f build.md "$DOWNLOAD_DIR/build.md"
 
-pr "Outputs are available in /sdcard/Download/revanced-magisk-module folder"
-am start -a android.intent.action.VIEW -d file:///sdcard/Download/revanced-magisk-module -t resource/folder
-sleep 2
-am start -a android.intent.action.VIEW -d file:///sdcard/Download/revanced-magisk-module -t resource/folder
+pr "Outputs are available in ${DOWNLOAD_DIR}"
+am start -a android.intent.action.VIEW \
+	-d "file://${DOWNLOAD_DIR}" -t resource/folder >/dev/null 2>&1 || true
