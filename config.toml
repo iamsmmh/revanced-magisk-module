@@ -21,7 +21,10 @@ morphe-brand = "Morphe"
 signer = "Morphe Module Builder"
 
 # Safe defaults for compact, repeatable builds.
-bytecode-mode = "STRIP_SAFE"
+# FULL fully recompiles patched DEX files and is the most reliable mode.
+# STRIP_SAFE is not used by default: Morphe Patcher can crash while rebuilding
+# DEX in that mode ("An unexpected error occurred: null") and plans to remove it.
+bytecode-mode = "FULL"
 strip-libs = true
 verify-source-signature = true
 

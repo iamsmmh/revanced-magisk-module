@@ -90,7 +90,10 @@ jobs:
           MORPHE_SIGNER: ${{ secrets.MORPHE_SIGNER }}
         run: ./build.sh "$CONFIG_FILE"
 
+      # Only publish from the default branch. Manual runs on feature branches
+      # are build checks and must not create releases or touch the update branch.
       - name: Publish release
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.release.outputs.version_code }}
@@ -101,6 +104,7 @@ jobs:
           generate_release_notes: false
 
       - name: Publish module update metadata
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_CODE: ${{ steps.release.outputs.version_code }}

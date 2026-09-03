@@ -12,7 +12,7 @@ morphe-brand = "Morphe"
 # Set MORPHE_KEYSTORE and the matching signing environment variables when
 # using a keystore shared with your Morphe Manager installation.
 signer = "Morphe Module Builder"
-bytecode-mode = "STRIP_SAFE"
+bytecode-mode = "FULL"
 strip-libs = true
 verify-source-signature = false
 

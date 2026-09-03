@@ -24,7 +24,7 @@ patches-source = "MorpheApp/morphe-patches"
 patches-version = "latest"        # latest, dev, or an exact tag such as v1.41.0
 morphe-brand = "Morphe"            # output/module label
 
-bytecode-mode = "STRIP_SAFE"       # FULL, STRIP_SAFE, or STRIP_FAST
+bytecode-mode = "FULL"             # FULL (default), STRIP_FAST, or STRIP_SAFE
 strip-libs = true                   # remove native libraries not needed by the target arch
 keep-architectures = ""             # e.g. "arm64-v8a,armeabi-v7a"
 verify-source-signature = true       # verify hashes listed in source-signatures.txt
@@ -44,6 +44,17 @@ signer = "Morphe Module Builder"
 similarly override the corresponding signing settings. This is recommended
 for CI secrets and personal keys. If the configured file is not present, the
 builder lets Morphe create/use its default key in `temp/morphe-data`.
+
+`bytecode-mode` controls how patched DEX files are compiled:
+
+- `FULL` (default) rewrites all DEX files through DexPool. Slowest, but the
+  most reliable and produces the cleanest output.
+- `STRIP_FAST` is Morphe Desktop's own default. Faster, but leaves dead data
+  in the original DEX files.
+- `STRIP_SAFE` should be avoided for automated builds: current Morphe Patcher
+  versions can abort mid-build with `An unexpected error occurred: null`
+  (a `ConcurrentModificationException` while rebuilding DEX), and the Morphe
+  team plans to remove the mode.
 
 ## App settings
 
@@ -71,7 +82,7 @@ options-file = "options/youtube.json"   # optional Morphe options JSON
 options-update = false
 force = false                            # pass Morphe's --force
 continue-on-error = false
-bytecode-mode = "STRIP_SAFE"
+bytecode-mode = "FULL"
 strip-libs = true
 keep-architectures = "arm64-v8a,armeabi-v7a"
 verify-source-signature = true
