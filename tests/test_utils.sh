@@ -15,6 +15,8 @@ assert_eq() {
 toml_prep "$(cat config.toml)"
 tables=$(toml_get_table_names | paste -sd, -)
 assert_eq "$tables" "YouTube,YouTube-Music,Reddit"
+# STRIP_SAFE aborts Morphe Patcher mid-build; the shipped configs must use FULL.
+assert_eq "$(toml_get "$(toml_get_table '')" bytecode-mode)" FULL
 assert_eq "$(toml_get "$(toml_get_table YouTube)" build-mode)" both
 assert_eq "$(toml_get "$(toml_get_table YouTube-Music)" app-name)" "YouTube Music"
 
@@ -95,6 +97,24 @@ EOF
 	fi
 	single=$(variant_row '/apk/x/solo/solo-2-0-android-apk-download/' 2.0 APK universal 420dpi)
 	assert_eq "$(apk_mirror_search "$single" nodpi arm64-v8a APK)" "https://www.apkmirror.com/apk/x/solo/solo-2-0-android-apk-download/"
+
+	# Density ranges (universal BUNDLE variants) must match when the config asks
+	# for the generic nodpi, and a configured numeric dpi must be inside the range.
+	# nth-last-child(1) is the row shown last on the page (the newest upload),
+	# which is the variant the builder prefers.
+	range_page=$(printf '<div class="variants">%s%s</div>' \
+		"$(variant_row '/apk/x/reddit/reddit-2026-14-0-android-apk-download/' 2026.14.0 BUNDLE universal 120-640dpi)" \
+		"$(variant_row '/apk/x/reddit/reddit-2026-14-0-2-android-apk-download/' 2026.14.0 BUNDLE universal 120-640dpi)")
+	assert_eq "$(apk_mirror_search "$range_page" nodpi all BUNDLE)" "https://www.apkmirror.com/apk/x/reddit/reddit-2026-14-0-2-android-apk-download/"
+	assert_eq "$(apk_mirror_search "$range_page" 420dpi all BUNDLE)" "https://www.apkmirror.com/apk/x/reddit/reddit-2026-14-0-2-android-apk-download/"
+	if apk_mirror_search "$range_page" 900dpi all BUNDLE >/dev/null; then
+		fail "expected a dpi outside the 120-640 range not to match"
+	fi
+	apkmirror_dpi_matches 120-640dpi nodpi || fail "expected dpi range to match generic nodpi"
+	apkmirror_dpi_matches 120-640dpi 420dpi || fail "expected configured dpi inside range to match"
+	apkmirror_dpi_matches 120-640dpi 900dpi && fail "expected dpi outside range not to match"
+	apkmirror_dpi_matches 160dpi 160dpi || fail "expected identical single densities to match"
+	apkmirror_dpi_matches 160dpi 420dpi && fail "expected different single densities not to match"
 else
 	echo "skipping htmlq-based APKMirror tests (no x86_64 htmlq binary)"
 fi

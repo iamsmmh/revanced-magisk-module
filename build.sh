@@ -63,7 +63,10 @@ DEF_SIGNER=$(toml_get "$main_config_t" signer) || DEF_SIGNER="Morphe Module Buil
 [ -n "${MORPHE_KEYSTORE_ALIAS-}" ] && DEF_KEYSTORE_ALIAS="$MORPHE_KEYSTORE_ALIAS"
 [ -n "${MORPHE_KEYSTORE_ENTRY_PASSWORD-}" ] && DEF_KEYSTORE_ENTRY_PASSWORD="$MORPHE_KEYSTORE_ENTRY_PASSWORD"
 [ -n "${MORPHE_SIGNER-}" ] && DEF_SIGNER="$MORPHE_SIGNER"
-DEF_BYTECODE_MODE=$(toml_get "$main_config_t" bytecode-mode) || DEF_BYTECODE_MODE=STRIP_SAFE
+# FULL is the default: it is the only mode without known patcher issues.
+# STRIP_SAFE can throw a ConcurrentModificationException inside Morphe Patcher
+# ("An unexpected error occurred: null") and the Morphe team plans to remove it.
+DEF_BYTECODE_MODE=$(toml_get "$main_config_t" bytecode-mode) || DEF_BYTECODE_MODE=FULL
 DEF_STRIP_LIBS=$(toml_get "$main_config_t" strip-libs) || DEF_STRIP_LIBS=true
 DEF_KEEP_ARCHITECTURES=$(toml_get "$main_config_t" keep-architectures) || DEF_KEEP_ARCHITECTURES=""
 DEF_FORCE=$(toml_get "$main_config_t" force) || DEF_FORCE=false

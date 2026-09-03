@@ -420,20 +420,46 @@ apkmirror_req() {
 	done
 	return 1
 }
+# APKMirror labels a variant's DPI as 'nodpi', 'anydpi', a single density such
+# as '420dpi', or a density range such as '120-640dpi' (common for universal
+# BUNDLE variants). The default configuration asks for 'nodpi' (any density),
+# so numeric/range variants must be accepted too; otherwise releases such as
+# Reddit's would have no matching variant at all. A configured numeric dpi only
+# matches when it equals the variant or falls inside its range.
+apkmirror_dpi_matches() {
+	local actual="${1-}" cfg="${2:-nodpi}" lo hi num
+	case "$actual" in
+		nodpi|anydpi) return 0 ;;
+	esac
+	if [[ "$actual" =~ ^([0-9]+)-([0-9]+)dpi$ ]]; then
+		lo="${BASH_REMATCH[1]}" hi="${BASH_REMATCH[2]}"
+		case "$cfg" in
+			nodpi|anydpi|'') return 0 ;;
+			*dpi)
+				[[ "$cfg" =~ ^[0-9]+dpi$ ]] || return 1
+				num="${cfg%dpi}"
+				((num >= 10#$lo && num <= 10#$hi)) && return 0
+				return 1
+				;;
+		esac
+	fi
+	if [[ "$actual" =~ ^[0-9]+dpi$ ]]; then
+		case "$cfg" in
+			nodpi|anydpi|'') return 0 ;;
+			*dpi) [ "$actual" = "$cfg" ] && return 0 ;;
+		esac
+	fi
+	return 1
+}
+
 apk_mirror_search() {
 	local response="$1" dpi="$2" arch="$3" apk_bundle="$4"
-	local dlurl="" node app_table emptyCheck
+	local dlurl="" node app_table emptyCheck candidates=""
 	local -a apparch
 	if [ "$arch" = all ]; then
 		apparch=(universal noarch 'arm64-v8a + armeabi-v7a')
 	else
 		apparch=("$arch" universal noarch 'arm64-v8a + armeabi-v7a')
-	fi
-	# Match the configured dpi but also the generic values APKMirror uses so a
-	# stricter configured value does not reject every listed variant.
-	local -a appdpi=(nodpi anydpi)
-	if [ -n "$dpi" ] && ! isoneof "$dpi" "${appdpi[@]}"; then
-		appdpi+=("$dpi")
 	fi
 	local n
 	for ((n = 1; n < 40; n++)); do
@@ -444,19 +470,26 @@ apk_mirror_search() {
 		[ -n "$emptyCheck" ] || break
 		app_table=$("$HTMLQ" --text --ignore-whitespace <<<"$node")
 		[ "$(sed -n 3p <<<"$app_table")" = "$apk_bundle" ] || continue
+		[ -n "$candidates" ] && candidates+="; "
+		candidates+="$(sed -n 1,8p <<<"$app_table" | awk 'NR > 1 { printf " | " } { printf "%s", $0 }')"
 		dlurl=$("$HTMLQ" --base https://www.apkmirror.com --attribute href \
 			"div:nth-child(1) > a:nth-child(1)" <<<"$node")
-		if isoneof "$(sed -n 6p <<<"$app_table")" "${appdpi[@]}" &&
+		if apkmirror_dpi_matches "$(sed -n 6p <<<"$app_table")" "$dpi" &&
 			isoneof "$(sed -n 4p <<<"$app_table")" "${apparch[@]}"; then
 			printf '%s\n' "$dlurl"
 			return 0
 		fi
 	done
-	if [ "$n" -eq 2 ] && [ -n "$dlurl" ]; then
+	if [ "$n" -eq 2 ] && [ -n "${dlurl:-}" ]; then
 		# The release page lists a single variant; accept it even when its
 		# dpi/arch columns do not match the configured values.
 		printf '%s\n' "$dlurl"
 		return 0
+	fi
+	# Keep diagnostics actionable: print the rows of the requested kind so a
+	# future APKMirror markup or variant change is easy to see in CI.
+	if [ -n "$candidates" ]; then
+		epr "APKMirror '$apk_bundle' rows found but none matched arch '$arch' dpi '$dpi': $candidates"
 	fi
 	return 1
 }
@@ -650,9 +683,22 @@ patch_apk() {
 	# annotation carries the underlying error instead of a generic message.
 	local run_log="${result_file%.json}.log"
 	if ! MORPHE_DATA_DIR="${TEMP_DIR}/morphe-data" "${command[@]}" >"$run_log" 2>&1; then
-		local reason
-		reason=$(grep -m1 -iE 'error|exception|failed|aborted|invalid|unsupported|not (found|exist)' "$run_log" \
-			|| sed '/^[[:space:]]*$/d' "$run_log" | tail -n 1)
+		local reason fatal frames
+		# Morphe Desktop reports unexpected crashes as
+		# "SEVERE: An unexpected error occurred: <message>" followed by the
+		# stack trace. Include the exception class and the first frames so the
+		# CI annotation shows the actual cause instead of just "null".
+		fatal=$(grep -m1 -E '^SEVERE: An unexpected error occurred' "$run_log" || true)
+		if [ -n "$fatal" ]; then
+			reason="$fatal"
+			frames=$(grep -A8 '^SEVERE: An unexpected error occurred' "$run_log" \
+				| grep -m4 -E '^(java|kotlin|[a-zA-Z_$][a-zA-Z0-9_$.]*(\$[a-zA-Z0-9_$]+)?(Exception|Error))|\s+at ' \
+				| sed 's/^[[:space:]]*//' | awk 'NR > 1 { printf " | " } { printf "%s", $0 }')
+			[ -n "$frames" ] && reason+=" | $frames"
+		else
+			reason=$(grep -m1 -iE 'error|exception|failed|aborted|invalid|unsupported|not (found|exist)' "$run_log" \
+				|| sed '/^[[:space:]]*$/d' "$run_log" | tail -n 1)
+		fi
 		cat "$run_log" >&2
 		epr "Morphe patching failed for '$(basename "$input")': ${reason:-Morphe Desktop exited non-zero, see output above}"
 		return 1
