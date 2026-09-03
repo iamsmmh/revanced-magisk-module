@@ -104,13 +104,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_CODE: ${{ steps.release.outputs.version_code }}
         run: |
+          cp -f build.md "$RUNNER_TEMP/morphe-build.md"
           git fetch origin update:refs/remotes/origin/update >/dev/null 2>&1 || true
           if git show-ref --verify --quiet refs/remotes/origin/update; then
             git switch --force-create update origin/update
           else
             git switch --force-create update
           fi
-          cp -f "$GITHUB_WORKSPACE/build.md" build.md
+          cp -f "$RUNNER_TEMP/morphe-build.md" build.md
           shopt -s nullglob
           found=false
           for module in "$GITHUB_WORKSPACE"/build/*-module-*.zip; do
@@ -131,6 +132,8 @@ jobs:
           $found || true
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add build.md '*-update.json' 2>/dev/null || true
+          git add -f build.md
+          find . -maxdepth 1 -type f -name '*-update.json' -print0 \
+            | xargs -0 -r git add --
           git diff --cached --quiet || git commit -m "Publish Morphe build $RELEASE_CODE"
           git push origin HEAD:update

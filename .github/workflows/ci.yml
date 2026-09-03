@@ -40,7 +40,8 @@ jobs:
             echo 'should_build=true' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ./build.sh "$CONFIG_FILE" --config-update | grep -q .; then
+          updated_config=$(./build.sh "$CONFIG_FILE" --config-update || true)
+          if [ -n "$updated_config" ]; then
             echo 'should_build=true' >> "$GITHUB_OUTPUT"
           else
             echo 'should_build=false' >> "$GITHUB_OUTPUT"

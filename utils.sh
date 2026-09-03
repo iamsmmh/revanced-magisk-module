@@ -52,6 +52,13 @@ slugify() {
 	printf '%s' "${value:-app}"
 }
 
+path_from_cwd() {
+	case "${1-}" in
+		/*) printf '%s' "$1" ;;
+		*) printf '%s/%s' "$CWD" "${1-}" ;;
+	esac
+}
+
 # Print a human-readable progress line. Error output goes to stderr so command
 # substitutions can safely consume paths and API responses.
 pr() { echo -e "\033[0;32m[+] ${1-}\033[0m"; }
@@ -258,8 +265,9 @@ get_release_asset() {
 	[ "$response" != null ] || return 1
 	tag=$(jq -e -r '.tag_name' <<<"$response") || return 1
 	asset=$(jq -e -r --arg suffix "$suffix" \
-		'.assets[] | select(.name | endswith($suffix)) | [.name, .url] | @tsv' \
-		<<<"$response" | head -n 1) || return 1
+		'[.assets[] | select(.name | endswith($suffix))] |
+			if length == 0 then error("release asset not found") else .[0] | [.name, .url] | @tsv end' \
+		<<<"$response") || return 1
 	local asset_name="${asset%%$'\t'*}" api_url="${asset#*$'\t'}"
 	local cache_dir="${TEMP_DIR}/morphe/$(repo_cache_name "$repo")"
 	local target="${cache_dir}/${asset_name}"
@@ -386,7 +394,7 @@ merge_splits() {
 	unzip -qo "$merged" -d "$unpack" || return 1
 	(
 		cd "$unpack" || exit 1
-		zip -0rq "${CWD}/${output}" .
+		zip -0rq "$(path_from_cwd "$output")" .
 	) || return 1
 	rm -rf "$merged" "$unpack"
 	[ -s "$output" ]
@@ -573,7 +581,9 @@ build_morphe() {
 	eval "declare -A args=${1#*=}"
 	local table="${args[table]}" app_name="${args[app_name]}" app_slug
 	app_slug=$(slugify "$app_name")
-	local app_name_l="$app_slug" arch="${args[arch]}" arch_f="${arch// /}"
+	local app_name_l="$app_slug"
+	local arch="${args[arch]}"
+	local arch_f="${arch// /}"
 	local mode_arg="${args[build_mode]}" version_mode="${args[version]}"
 	local morphe_jar="${args[morphe_jar]}" patches_file="${args[patches_file]}"
 	local download_source="" pkg_name="" version="" latest=false force_version=false
@@ -730,14 +740,14 @@ build_morphe() {
 			"${app_name} ${brand} Magisk/KernelSU module built by ${PROJECT_NAME}" \
 			"https://raw.githubusercontent.com/${GITHUB_REPOSITORY-}/update/${update_json}" \
 			"$base_template"
-		module_output="${BUILD_DIR}/${app_name_l}-${brand_slug}-morphe-module-v${version_f}-${arch_f}.zip"
+			module_output="${BUILD_DIR}/${app_name_l}-${brand_slug}-module-v${version_f}-${arch_f}.zip"
 		cp -f "$patched_apk" "${base_template}/base.apk"
 		if [ "${args[include_stock]}" = true ]; then cp -f "$stock_apk" "${base_template}/${pkg_name}.apk"; fi
 		pr "Packing $table module"
-		(
-			cd "$base_template" || exit 1
-			zip -"$COMPRESSION_LEVEL" -FSqr "${CWD}/${module_output}" .
-		) || { rm -rf "$base_template"; return 1; }
+			(
+				cd "$base_template" || exit 1
+				zip -"$COMPRESSION_LEVEL" -FSqr "$(path_from_cwd "$module_output")" .
+			) || { rm -rf "$base_template"; return 1; }
 		rm -rf "$base_template"
 		pr "Built $table module: '$module_output'"
 	done
