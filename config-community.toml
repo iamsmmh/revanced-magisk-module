@@ -1,0 +1,37 @@
+# Optional community Morphe sources.
+# Copy this file to a private config and enable only the apps you use.
+# The official source remains the recommended default in config.toml.
+
+enable-magisk-update = true
+parallel-jobs = 1
+compression-level = 9
+morphe-source = "MorpheApp/morphe-desktop"
+morphe-version = "latest"
+morphe-brand = "Morphe"
+
+# Set MORPHE_KEYSTORE and the matching signing environment variables when
+# using a keystore shared with your Morphe Manager installation.
+signer = "Morphe Module Builder"
+bytecode-mode = "STRIP_SAFE"
+strip-libs = true
+verify-source-signature = false
+
+# Piko provides Morphe patches for X/Twitter and Instagram.
+[X]
+enabled = false
+app-name = "X"
+patches-source = "crimera/piko"
+patches-version = "latest"
+apkmirror-dlurl = "https://www.apkmirror.com/apk/twitter-inc/twitter"
+build-mode = "apk"
+
+[Instagram]
+enabled = false
+app-name = "Instagram"
+patches-source = "crimera/piko"
+patches-version = "latest"
+apkmirror-dlurl = "https://www.apkmirror.com/apk/instagram/instagram"
+build-mode = "apk"
+
+# Any repository that publishes a Morphe .mpp asset can be used in the same
+# way. Check its README for the exact supported app versions and patch names.

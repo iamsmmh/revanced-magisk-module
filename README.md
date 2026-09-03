@@ -1,50 +1,151 @@
-# ReVanced Magisk Module
-[![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/rvc_magisk)
-[![CI](https://github.com/j-hc/revanced-magisk-module/actions/workflows/ci.yml/badge.svg?event=schedule)](https://github.com/j-hc/revanced-magisk-module/actions/workflows/ci.yml)
+# Morphe Module Builder
 
-Extensive ReVanced builder  
+[![Build](https://github.com/iamsmmh/morphe-module-builder/actions/workflows/ci.yml/badge.svg)](https://github.com/iamsmmh/morphe-module-builder/actions/workflows/ci.yml)
+[![Morphe Desktop](https://img.shields.io/badge/engine-Morphe%20Desktop-7c4dff?style=for-the-badge)](https://github.com/MorpheApp/morphe-desktop)
+[![Morphe patches](https://img.shields.io/badge/patches-Morphe-00a884?style=for-the-badge)](https://github.com/MorpheApp/morphe-patches)
 
-Get the [latest CI release](https://github.com/j-hc/revanced-magisk-module/releases).
+A configurable APK and Magisk/KernelSU module builder powered by **Morphe
+Desktop** and the official **Morphe patches**. It is the command-line and CI
+companion to [Morphe Manager](https://github.com/MorpheApp/morphe-manager): use
+Manager for an interactive on-device workflow, or use this repository when
+you want repeatable builds, patch selections, multiple architectures, and
+release automation.
 
-Use [**zygisk-detach**](https://github.com/j-hc/zygisk-detach) to detach YouTube and YT Music from Play Store if you are using magisk modules. 
+> This project patches software that you provide. Only modify and install APKs
+> when you have the right to do so. Keep an untouched original APK for
+> rollback, and follow the license and terms of every app and patch source.
 
-<details><summary><big>Features</big></summary>
-<ul>
- <li>Support all present and future ReVanced and <a href="https://github.com/inotia00/revanced-patches">ReVanced Extended</a> apps</li>
- <li> Can build Magisk modules and non-root APKs</li>
- <li> Updated daily with the latest versions of apps and patches</li>
- <li> Optimize APKs and modules for size</li>
- <li> Modules</li>
-    <ul>
-     <li> recompile invalidated odex for faster usage</li>
-     <li> receive updates from Magisk app</li>
-     <li> do not break safetynet or trigger root detections</li>
-     <li> handle installation of the correct version of the stock app and all that</li>
-     <li> support Magisk and KernelSU</li>
-    </ul>
-</ul>
-Note that the <a href="../../actions/workflows/ci.yml">CI workflow</a> is scheduled to build the modules and APKs everyday using GitHub Actions if there is a change in ReVanced patches. You may want to disable it.
-</details>
+## What it does
 
-## To include/exclude patches or patch other apps
+- Downloads the current Morphe Desktop CLI and `.mpp` patch bundles from GitHub
+  releases, with support for pinned or development versions.
+- Uses the same patch bundle format and patch names exposed by Morphe Manager.
+- Downloads original APKs from APKMirror, Uptodown, or an Internet Archive
+  mirror; APKMirror APKM split bundles are merged before module packaging.
+- Produces a standalone patched APK, a Magisk/KernelSU mount module, or both.
+- Supports app-specific patch selections, exclusive mode, Morphe options JSON,
+  bytecode modes, native-library trimming, source signature verification, and
+  ARM/x86 architecture choices.
+- Works locally, in GitHub Actions, and on Android through Termux.
+- Keeps generated artifacts, patching reports, and cached releases out of Git.
 
- * Star the repo :eyes:
- * Use the repo as a [template](https://github.com/new?template_name=revanced-magisk-module&template_owner=j-hc)
- * Customize [`config.toml`](./config.toml) using [rvmm-config-gen](https://j-hc.github.io/rvmm-config-gen/)
- * Run the build [workflow](../../actions/workflows/build.yml)
- * Grab your modules and APKs from [releases](../../releases)
+## Quick start
 
-also see here [`CONFIG.md`](./CONFIG.md)
+### Desktop
 
-## Building Locally
-### On Termux
+Requirements: Bash, `jq`, `wget`, `zip`, `unzip`, and **Java 21 or newer**.
+
 ```console
-bash <(curl -sSf https://raw.githubusercontent.com/j-hc/revanced-magisk-module/main/build-termux.sh)
+git clone https://github.com/iamsmmh/morphe-module-builder
+cd morphe-module-builder
+./build.sh
 ```
 
-### On Desktop
+The default [`config.toml`](./config.toml) builds YouTube, YouTube Music, and
+Reddit in APK and module modes. Outputs are placed in `build/`.
+
+Build another configuration:
+
 ```console
-$ git clone https://github.com/j-hc/revanced-magisk-module
-$ cd revanced-magisk-module
-$ ./build.sh
+./build.sh config-community.toml
+./build.sh clean
 ```
+
+The builder downloads Morphe Desktop and Morphe patches on the first run; no
+Morphe source checkout or Gradle build is required.
+
+### Termux
+
+Install Termux from a trusted source, then run:
+
+```console
+bash <(curl -fsSL https://raw.githubusercontent.com/iamsmmh/morphe-module-builder/main/build-termux.sh)
+```
+
+Termux installs Java 21 and the small native helpers, opens the configuration
+for editing, and copies artifacts to
+`/sdcard/Download/morphe-module-builder/`.
+
+### GitHub Actions
+
+Use **Actions → Build Morphe modules → Run workflow** for a manual build, or
+let the scheduled check build when a configured Morphe patch release changes.
+The workflow publishes successful APKs and modules as a GitHub release.
+
+No private signing key is committed to this repository. For stable CI updates,
+add a repository secret named `MORPHE_KEYSTORE_B64` containing the base64-
+encoded keystore. Optional secrets `MORPHE_KEYSTORE_PASSWORD`,
+`MORPHE_KEYSTORE_ALIAS`, `MORPHE_KEYSTORE_ENTRY_PASSWORD`, and `MORPHE_SIGNER`
+override the signing settings without exposing them in the configuration. A
+key exported from Morphe Manager is preferred when builds from both tools must
+update each other.
+
+## Configure it
+
+Edit [`config.toml`](./config.toml). All app tables are optional and can be
+turned off with `enabled = false`. The complete reference is in
+[`CONFIG.md`](./CONFIG.md).
+
+A minimal custom app looks like this:
+
+```toml
+[My-App]
+enabled = true
+app-name = "My App"
+patches-source = "owner/my-morphe-patches"
+patches-version = "latest"
+apkmirror-dlurl = "https://www.apkmirror.com/apk/example/app"
+build-mode = "apk"
+version = "auto"
+included-patches = "'Remove ads' 'Custom branding'"
+```
+
+Morphe patch options can be made reproducible with an options file generated by
+Morphe Desktop:
+
+```console
+java -jar morphe-desktop-1.14.0-all.jar options-create \
+  --patches patches-1.41.0.mpp --out options/youtube.json
+```
+
+Then set `options-file = "options/youtube.json"` in the app table. See the
+[Morphe Desktop CLI documentation](https://github.com/MorpheApp/morphe-desktop/blob/main/docs/documentation.md)
+for the current patch and option names.
+
+## Modules and signing
+
+The generated module mounts the patched `base.apk` over the installed package
+and leaves the app's data intact. It supports Magisk and KernelSU installation.
+For a module to work with an app that is not already installed, leave
+`include-stock = true` so the matching original APK is bundled and installed
+first. If the app is a system app or its version does not match, the installer
+prints the exact recovery step instead of silently overwriting it.
+
+Morphe Desktop signs APK outputs. To share signatures with Morphe Manager,
+export the Manager keystore and provide it through `MORPHE_KEYSTORE`; do not
+publish your personal key. Reflash a module after changing the original app or
+patch version.
+
+## Project layout
+
+```text
+build.sh                 build APKs/modules from TOML
+utils.sh                 Morphe downloads, source adapters, and packaging
+config.toml              official Morphe source defaults
+config-community.toml    disabled examples for community Morphe sources
+CONFIG.md                configuration reference
+morphe-module/           Magisk/KernelSU module template
+source-signatures.txt    optional source APK certificate pins
+```
+
+## Credits
+
+- [Morphe Manager](https://github.com/MorpheApp/morphe-manager) and
+  [Morphe Desktop](https://github.com/MorpheApp/morphe-desktop) for the patching
+  engine and user workflows.
+- [Morphe patches](https://github.com/MorpheApp/morphe-patches) and other
+  Morphe-compatible patch authors.
+- [APKEditor](https://github.com/REAndroid/APKEditor) for split APK merging.
+- [cmpr](https://github.com/j-hc/cmpr) for module update checks.
+
+This project is GPL-3.0 licensed; see [LICENSE](./LICENSE).
