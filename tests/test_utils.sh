@@ -60,4 +60,43 @@ assert_eq "$MODULE_PREBUILTS_READY" true
 assert_eq "$(path_from_cwd build/output.apk)" "$CWD/build/output.apk"
 assert_eq "$(path_from_cwd /tmp/output.apk)" /tmp/output.apk
 
+# APKMirror variant matching: generic dpi values are accepted and a release
+# page with a single variant is used even when its columns do not match.
+if [ "$(uname -m)" = x86_64 ] && [ -x "$ROOT_DIR/bin/htmlq/htmlq-x86_64" ]; then
+	HTMLQ="$ROOT_DIR/bin/htmlq/htmlq-x86_64"
+	variant_row() {
+		cat <<EOF
+<div class="table-row headerFont">
+  <div class="table-cell">
+    <a href="$1">
+      <div><span>get_app</span></div>
+      <div><span>App $2</span></div>
+      <div><span>$3</span></div>
+      <div><span>$4</span></div>
+      <div><span>10 MB</span></div>
+      <div><span>$5</span></div>
+      <div><span>Android 9+</span></div>
+    </a>
+  </div>
+</div>
+EOF
+	}
+	resp=$(printf '<div class="variants">%s%s</div>' \
+		"$(variant_row '/apk/x/app/app-1-0-android-apk-download/' 1.0 APK universal nodpi)" \
+		"$(variant_row '/apk/x/app/app-1-0-2-android-apk-download/' 1.0 BUNDLE 'arm64-v8a + armeabi-v7a' anydpi)")
+	assert_eq "$(apk_mirror_search "$resp" nodpi all APK)" "https://www.apkmirror.com/apk/x/app/app-1-0-android-apk-download/"
+	assert_eq "$(apk_mirror_search "$resp" nodpi all BUNDLE)" "https://www.apkmirror.com/apk/x/app/app-1-0-2-android-apk-download/"
+	assert_eq "$(apk_mirror_search "$resp" 420dpi arm64-v8a BUNDLE)" "https://www.apkmirror.com/apk/x/app/app-1-0-2-android-apk-download/"
+	x86_only=$(printf '<div class="variants">%s%s</div>' \
+		"$(variant_row '/apk/x/app/app-1-0-3-android-apk-download/' 1.0 APK x86 nodpi)" \
+		"$(variant_row '/apk/x/app/app-1-0-4-android-apk-download/' 1.0 BUNDLE 'arm64-v8a + armeabi-v7a' nodpi)")
+	if apk_mirror_search "$x86_only" nodpi armeabi-v7a APK >/dev/null; then
+		fail "expected no armeabi-v7a APK variant to match"
+	fi
+	single=$(variant_row '/apk/x/solo/solo-2-0-android-apk-download/' 2.0 APK universal 420dpi)
+	assert_eq "$(apk_mirror_search "$single" nodpi arm64-v8a APK)" "https://www.apkmirror.com/apk/x/solo/solo-2-0-android-apk-download/"
+else
+	echo "skipping htmlq-based APKMirror tests (no x86_64 htmlq binary)"
+fi
+
 echo "All Morphe Module Builder helper tests passed."

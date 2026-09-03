@@ -103,6 +103,40 @@ fi
 rm -f "${TEMP_DIR}"/*tmp.* "${TEMP_DIR}"/*/*tmp.* 2>/dev/null || true
 get_prebuilts
 
+# Fail fast with actionable output when an imported keystore cannot be used.
+# Morphe signs every patched APK with it, so missing credentials would otherwise
+# fail each app separately with an opaque keystore error deep inside the build.
+if [ -n "${MORPHE_KEYSTORE-}" ]; then
+	if [ ! -f "$MORPHE_KEYSTORE" ]; then
+		abort "MORPHE_KEYSTORE is set to '$MORPHE_KEYSTORE' but the file does not exist"
+	fi
+	if [ -z "${MORPHE_KEYSTORE_PASSWORD-}" ]; then
+		abort "MORPHE_KEYSTORE is set but MORPHE_KEYSTORE_PASSWORD is empty. \
+Set it (and MORPHE_KEYSTORE_ALIAS / MORPHE_KEYSTORE_ENTRY_PASSWORD when the key uses different values) \
+so Morphe can open the keystore, or unset MORPHE_KEYSTORE to use Morphe's default key."
+	fi
+	if command -v keytool >/dev/null 2>&1; then
+		local_keystore_alias="${MORPHE_KEYSTORE_ALIAS-}"
+		[ -n "$local_keystore_alias" ] || local_keystore_alias=Morphe
+		keystore_list=$(keytool -list -keystore "$MORPHE_KEYSTORE" \
+			-storepass "$MORPHE_KEYSTORE_PASSWORD" 2>/dev/null) || keystore_list=""
+		if [ -z "$keystore_list" ]; then
+			# keytool can only read JKS/PKCS12; Morphe additionally accepts BKS.
+			# Only treat the failure as fatal for formats keytool understands.
+			keystore_magic=$(od -An -tx1 -N4 "$MORPHE_KEYSTORE" 2>/dev/null | tr -d '[:space:]')
+			case "$keystore_magic" in
+				feedfeed*|3082*|3080*)
+					abort "cannot open MORPHE_KEYSTORE '$MORPHE_KEYSTORE' with the supplied MORPHE_KEYSTORE_PASSWORD" ;;
+				*)
+					pr "Warning: could not inspect MORPHE_KEYSTORE with keytool (unsupported format); continuing" ;;
+			esac
+		elif ! grep -q "^${local_keystore_alias}, " <<<"$keystore_list"; then
+			abort "alias '${local_keystore_alias}' not found in MORPHE_KEYSTORE '$MORPHE_KEYSTORE'. \
+Set MORPHE_KEYSTORE_ALIAS to one of the keystore's aliases."
+		fi
+	fi
+fi
+
 # -- Build each configured app -----------------------------------------------
 declare -a table_names=()
 mapfile -t table_names < <(toml_get_table_names)

@@ -124,6 +124,11 @@ For best update compatibility:
 4. Do not commit a personal keystore. This repository intentionally ships no
    private signing material.
 
+When `MORPHE_KEYSTORE` is set the builder validates before building that the
+file exists, opens with `MORPHE_KEYSTORE_PASSWORD`, and contains the configured
+alias. A keystore that cannot be opened fails the build immediately with the
+missing setting named in the error instead of failing every app during patching.
+
 ## Output files
 
 Successful builds are written to `build/`:
