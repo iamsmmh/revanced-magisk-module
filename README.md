@@ -21,7 +21,7 @@ release automation.
   releases, with support for pinned or development versions.
 - Uses the same patch bundle format and patch names exposed by Morphe Manager.
 - Downloads original APKs from APKMirror, Uptodown, or an Internet Archive
-  mirror; APKM/XAPK/APKS split bundles are merged before module packaging.
+  mirror; APKMirror APKM split bundles are merged before module packaging.
 - Produces a standalone patched APK, a Magisk/KernelSU mount module, or both.
 - Supports app-specific patch selections, exclusive mode, Morphe options JSON,
   bytecode modes, native-library trimming, source signature verification, and

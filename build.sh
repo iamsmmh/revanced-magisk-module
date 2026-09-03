@@ -81,6 +81,8 @@ if [ "${2-}" = --config-update ]; then
 	exit 0
 fi
 
+find "$BUILD_DIR" -maxdepth 1 -type f \( -name '*.apk' -o -name '*.zip' \) -delete
+rm -f "${TEMP_DIR}"/failed-*
 : >build.md
 if [ "$ENABLE_MAGISK_UPDATE" = true ] && [ -z "${GITHUB_REPOSITORY-}" ]; then
 	pr "Local build detected; Magisk update metadata will be omitted."
@@ -104,6 +106,21 @@ get_prebuilts
 # -- Build each configured app -----------------------------------------------
 declare -a table_names=()
 mapfile -t table_names < <(toml_get_table_names)
+module_build=false
+for table_name in "${table_names[@]}"; do
+	[ -n "$table_name" ] || continue
+	t=$(toml_get_table "$table_name")
+	enabled=$(toml_get "$t" enabled) || enabled=true
+	[ "$enabled" = false ] && continue
+	build_mode=$(toml_get "$t" build-mode) || build_mode=apk
+	case "$build_mode" in
+		module|both) module_build=true; break ;;
+	esac
+done
+if [ "$module_build" = true ]; then
+	get_module_prebuilts || abort "could not download module update helper binaries"
+fi
+
 idx=0
 for table_name in "${table_names[@]}"; do
 	[ -n "$table_name" ] || continue
@@ -126,7 +143,7 @@ for table_name in "${table_names[@]}"; do
 	if ! MORPHE_FILES=$(get_morphe_prebuilts "$morphe_src" "$morphe_ver" "$patches_src" "$patches_ver"); then
 		abort "could not download Morphe Desktop or Morphe patches for '$table_name'"
 	fi
-	read -r morphe_jar morphe_patches <<<"$MORPHE_FILES"
+	IFS=$'\t' read -r morphe_jar morphe_patches <<<"$MORPHE_FILES"
 	app_args[morphe_jar]="$morphe_jar"
 	app_args[patches_file]="$morphe_patches"
 	app_args[patches_source]="$patches_src"

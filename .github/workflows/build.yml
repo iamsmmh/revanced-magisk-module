@@ -81,6 +81,7 @@ jobs:
 
       - name: Build with Morphe Desktop and Morphe patches
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           NEXT_VER_CODE: ${{ steps.release.outputs.version_code }}
           MORPHE_KEYSTORE_PASSWORD: ${{ secrets.MORPHE_KEYSTORE_PASSWORD }}

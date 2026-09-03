@@ -44,4 +44,20 @@ chmod +x "$fake_bin/java"
 PATH="$fake_bin:$PATH"
 assert_eq "$(get_patch_last_supported_ver fake.jar patches.mpp com.example.app '' false)" 1.10.0
 
+# Module helper binaries are fetched only for module builds and are made
+# executable before the template is copied into a ZIP.
+module_bin=$(mktemp -d)
+trap 'rm -rf "$fake_bin" "$module_bin"' EXIT
+MODULE_TEMPLATE_DIR="$module_bin/template"
+MODULE_PREBUILTS_READY=false
+gh_dl() { printf cmpr >"$1"; }
+get_module_prebuilts
+for arch in arm64 arm x86 x64; do
+	[ -x "$MODULE_TEMPLATE_DIR/bin/$arch/cmpr" ] || fail "missing cmpr helper for $arch"
+done
+assert_eq "$MODULE_PREBUILTS_READY" true
+
+assert_eq "$(path_from_cwd build/output.apk)" "$CWD/build/output.apk"
+assert_eq "$(path_from_cwd /tmp/output.apk)" /tmp/output.apk
+
 echo "All Morphe Module Builder helper tests passed."

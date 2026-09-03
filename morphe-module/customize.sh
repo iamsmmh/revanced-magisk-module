@@ -27,7 +27,7 @@ esac
 if su -M -c true >/dev/null 2>&1; then
 	root_cmd() { su -M -c "$*"; }
 else
-	root_cmd() { nsenter -t 1 -m -- "$@"; }
+	root_cmd() { nsenter -t 1 -m "$@"; }
 fi
 
 set_perm_recursive "$MODPATH/bin" 0 0 0755 0777

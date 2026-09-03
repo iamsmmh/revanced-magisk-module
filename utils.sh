@@ -13,8 +13,9 @@ TEMP_DIR="${TEMP_DIR:-temp}"
 BIN_DIR="${BIN_DIR:-bin}"
 BUILD_DIR="${BUILD_DIR:-build}"
 
-if [ -n "${GITHUB_TOKEN-}" ]; then
-	GH_HEADER="Authorization: Bearer ${GITHUB_TOKEN}"
+GH_AUTH_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN-}}"
+if [ -n "$GH_AUTH_TOKEN" ]; then
+	GH_HEADER="Authorization: Bearer ${GH_AUTH_TOKEN}"
 else
 	GH_HEADER=""
 fi
@@ -304,9 +305,13 @@ get_prebuilts() {
 	fi
 	[ -x "$HTMLQ" ] || abort "htmlq helper is missing or not executable: $HTMLQ"
 
-	# cmpr is executed on the Android device by the generated module.  Keep the
-	# four architecture-specific copies in the template, but download them only
+}
+
+get_module_prebuilts() {
+	# cmpr is executed on the Android device by the generated module. Keep the
+	# four architecture-specific copies in the template, but fetch them only
 	# when a build actually needs to package a module.
+	[ "${MODULE_PREBUILTS_READY:-false}" = true ] && return 0
 	mkdir -p "${MODULE_TEMPLATE_DIR}/bin/arm64" "${MODULE_TEMPLATE_DIR}/bin/arm" \
 		"${MODULE_TEMPLATE_DIR}/bin/x86" "${MODULE_TEMPLATE_DIR}/bin/x64"
 	gh_dl "${MODULE_TEMPLATE_DIR}/bin/arm64/cmpr" "https://github.com/j-hc/cmpr/releases/latest/download/cmpr-arm64-v8a"
@@ -314,6 +319,7 @@ get_prebuilts() {
 	gh_dl "${MODULE_TEMPLATE_DIR}/bin/x86/cmpr" "https://github.com/j-hc/cmpr/releases/latest/download/cmpr-x86"
 	gh_dl "${MODULE_TEMPLATE_DIR}/bin/x64/cmpr" "https://github.com/j-hc/cmpr/releases/latest/download/cmpr-x86_64"
 	chmod 0755 "${MODULE_TEMPLATE_DIR}"/bin/*/cmpr 2>/dev/null || true
+	MODULE_PREBUILTS_READY=true
 }
 
 ###############################################################################
@@ -729,6 +735,10 @@ build_morphe() {
 			continue
 		fi
 
+		get_module_prebuilts || {
+			epr "could not download module update helper binaries for '$table'"
+			return 1
+		}
 		base_template=$(mktemp -d -p "$TEMP_DIR")
 		cp -a "${MODULE_TEMPLATE_DIR}/." "$base_template/"
 		update_json="${app_slug}-${arch_f}-update.json"
