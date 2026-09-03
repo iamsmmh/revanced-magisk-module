@@ -24,7 +24,7 @@ jobs:
       should_build: ${{ steps.decision.outputs.should_build }}
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 

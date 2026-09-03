@@ -388,7 +388,7 @@ merge_splits() {
 	local apkeditor="${TEMP_DIR}/apkeditor.jar"
 	pr "Merging split APK bundle"
 	if [ ! -s "$apkeditor" ]; then
-		gh_dl "$apkeditor" "https://github.com/REAndroid/APKEditor/releases/download/V1.3.9/APKEditor-1.3.9.jar" || return 1
+		gh_dl "$apkeditor" "https://github.com/REAndroid/APKEditor/releases/download/V1.4.9/APKEditor-1.4.9.jar" || return 1
 	fi
 	local merged="${bundle}.mzip" unpack="${bundle}-zip"
 	rm -rf "$merged" "$unpack"
@@ -407,53 +407,97 @@ merge_splits() {
 }
 
 # -------------------- APKMirror --------------------
+# APKMirror sits behind Cloudflare and intermittently answers rate-limit or
+# challenge pages; retry page fetches briefly before treating them as failures.
+apkmirror_req() {
+	local url="$1" response attempt
+	for attempt in 1 2 3; do
+		if response=$(req "$url" -); then
+			printf '%s' "$response"
+			return 0
+		fi
+		[ "$attempt" -eq 3 ] || sleep 5
+	done
+	return 1
+}
 apk_mirror_search() {
 	local response="$1" dpi="$2" arch="$3" apk_bundle="$4"
+	local dlurl="" node app_table emptyCheck
 	local -a apparch
 	if [ "$arch" = all ]; then
 		apparch=(universal noarch 'arm64-v8a + armeabi-v7a')
 	else
 		apparch=("$arch" universal noarch 'arm64-v8a + armeabi-v7a')
 	fi
-	local node app_table dlurl n
+	# Match the configured dpi but also the generic values APKMirror uses so a
+	# stricter configured value does not reject every listed variant.
+	local -a appdpi=(nodpi anydpi)
+	if [ -n "$dpi" ] && ! isoneof "$dpi" "${appdpi[@]}"; then
+		appdpi+=("$dpi")
+	fi
+	local n
 	for ((n = 1; n < 40; n++)); do
 		node=$("$HTMLQ" "div.table-row.headerFont:nth-last-child($n)" -r "span:nth-child(n+3)" <<<"$response")
 		[ -n "$node" ] || break
+		# Skip non-download rows (ads, headers) which have no link in the first cell.
+		emptyCheck=$("$HTMLQ" -t -w "div.table-cell:nth-child(1) > a:nth-child(1)" <<<"$node" | xargs)
+		[ -n "$emptyCheck" ] || break
 		app_table=$("$HTMLQ" --text --ignore-whitespace <<<"$node")
-		if [ "$(sed -n 3p <<<"$app_table")" = "$apk_bundle" ] && \
-			[ "$(sed -n 6p <<<"$app_table")" = "$dpi" ] && \
+		[ "$(sed -n 3p <<<"$app_table")" = "$apk_bundle" ] || continue
+		dlurl=$("$HTMLQ" --base https://www.apkmirror.com --attribute href \
+			"div:nth-child(1) > a:nth-child(1)" <<<"$node")
+		if isoneof "$(sed -n 6p <<<"$app_table")" "${appdpi[@]}" &&
 			isoneof "$(sed -n 4p <<<"$app_table")" "${apparch[@]}"; then
-			dlurl=$("$HTMLQ" --base https://www.apkmirror.com --attribute href \
-				"div:nth-child(1) > a:nth-child(1)" <<<"$node")
 			printf '%s\n' "$dlurl"
 			return 0
 		fi
 	done
+	if [ "$n" -eq 2 ] && [ -n "$dlurl" ]; then
+		# The release page lists a single variant; accept it even when its
+		# dpi/arch columns do not match the configured values.
+		printf '%s\n' "$dlurl"
+		return 0
+	fi
 	return 1
 }
 
 dl_apkmirror() {
 	local base_url="${1%/}" version="${2// /-}" output="$3" arch="$4" dpi="$5"
+	if [ -f "${output}.apkm" ]; then
+		# A previous run already fetched the bundle; verification and merging
+		# happen in build_morphe once all sources have been tried.
+		return 0
+	fi
 	[ "$arch" = arm-v7a ] && arch=armeabi-v7a
 	local page_url="${base_url}/${base_url##*/}-${version//./-}-release/"
 	local response node download_page download_url bundle=false
-	response=$(req "$page_url" -) || return 1
+	if ! response=$(apkmirror_req "$page_url"); then
+		epr "APKMirror release page not reachable: $page_url"
+		return 1
+	fi
 	node=$("$HTMLQ" "div.table-row.headerFont:nth-last-child(1)" -r "span:nth-child(n+3)" <<<"$response")
 	if [ -n "$node" ]; then
 		if ! download_page=$(apk_mirror_search "$response" "$dpi" "$arch" APK); then
-			download_page=$(apk_mirror_search "$response" "$dpi" "$arch" BUNDLE) || return 1
-			bundle=true
+			if download_page=$(apk_mirror_search "$response" "$dpi" "$arch" BUNDLE); then
+				bundle=true
+			else
+				epr "APKMirror has no matching variant for arch='$arch' dpi='$dpi' at: $page_url"
+				return 1
+			fi
 		fi
-		response=$(req "$download_page" -) || return 1
+		if ! response=$(apkmirror_req "$download_page"); then
+			epr "APKMirror variant page not reachable: $download_page"
+			return 1
+		fi
 	fi
 	download_url=$("$HTMLQ" --base https://www.apkmirror.com --attribute href "a.btn" <<<"$response") || return 1
 	download_url=$(req "$download_url" - | "$HTMLQ" --base https://www.apkmirror.com \
 		--attribute href "span > a[rel = nofollow]") || return 1
 	[ -n "$download_url" ] || return 1
 	if [ "$bundle" = true ]; then
+		# Keep the raw bundle next to the output. Signature verification must run
+		# against the original signed splits; merging happens afterwards.
 		req "$download_url" "${output}.apkm" || return 1
-		merge_splits "${output}.apkm" "$output"
-		rm -f "${output}.apkm"
 	else
 		req "$download_url" "$output"
 	fi
@@ -558,6 +602,29 @@ check_sig() {
 	return 0
 }
 
+# Verify every split inside an .apkm/.xapk bundle against source-signatures.txt.
+# The individual splits keep the original signing certificate, while a merged
+# APK does not, so bundles must be verified before they are merged.
+verify_splits() {
+	local bundle="$1" pkg_name="$2" extract="$1-splits" a ok=true
+	rm -rf "$extract"
+	mkdir -p "$extract"
+	if ! unzip -qo "$bundle" -d "$extract"; then
+		epr "could not unpack bundle '$bundle' for signature verification"
+		rm -rf "$extract"
+		return 1
+	fi
+	for a in "$extract"/*.apk; do
+		[ -e "$a" ] || continue
+		if ! check_sig "$a" "$pkg_name"; then
+			ok=false
+			break
+		fi
+	done
+	rm -rf "$extract"
+	[ "$ok" = true ]
+}
+
 patch_apk() {
 	local input="$1" output="$2" morphe_jar="$3" patches_file="$4" key_store="$5" store_password="$6"
 	local key_alias="$7" entry_password="$8" signer="$9" temporary="${10}" result_file="${11}"
@@ -578,9 +645,23 @@ patch_apk() {
 
 	pr "Patching $(basename "$input") with Morphe Desktop"
 	# The data directory keeps CI/Termux runs self-contained and prevents the
-	# desktop CLI from writing into a read-only home directory.
-	MORPHE_DATA_DIR="${TEMP_DIR}/morphe-data" "${command[@]}"
-	[ -s "$output" ]
+	# desktop CLI from writing into a read-only home directory. The full CLI
+	# output is kept next to the result file and echoed on failure so the
+	# annotation carries the underlying error instead of a generic message.
+	local run_log="${result_file%.json}.log"
+	if ! MORPHE_DATA_DIR="${TEMP_DIR}/morphe-data" "${command[@]}" >"$run_log" 2>&1; then
+		local reason
+		reason=$(grep -m1 -iE 'error|exception|failed|aborted|invalid|unsupported|not (found|exist)' "$run_log" \
+			|| sed '/^[[:space:]]*$/d' "$run_log" | tail -n 1)
+		cat "$run_log" >&2
+		epr "Morphe patching failed for '$(basename "$input")': ${reason:-Morphe Desktop exited non-zero, see output above}"
+		return 1
+	fi
+	if ! [ -s "$output" ]; then
+		cat "$run_log" >&2 || true
+		epr "Morphe Desktop produced no output for '$(basename "$input")'"
+		return 1
+	fi
 }
 
 build_morphe() {
@@ -663,9 +744,25 @@ build_morphe() {
 			epr "Could not download '$table' from $source at version '$version'"
 		done
 	fi
-	[ -s "$stock_apk" ] || return 1
+	[ -s "$stock_apk" ] || [ -f "${stock_apk}.apkm" ] || return 1
 
-	if [ "${args[verify_signature]}" = true ] && ! check_sig "$stock_apk" "$pkg_name"; then
+	local from_bundle=false
+	if [ -f "${stock_apk}.apkm" ]; then
+		from_bundle=true
+		# Splits inside the bundle keep the original signature; verify them
+		# before merging because the merged APK itself is not signed.
+		if [ "${args[verify_signature]}" = true ] && ! verify_splits "${stock_apk}.apkm" "$pkg_name"; then
+			return 1
+		fi
+		if ! merge_splits "${stock_apk}.apkm" "$stock_apk"; then
+			epr "could not merge split bundle for '$table'"
+			return 1
+		fi
+		rm -f "${stock_apk}.apkm"
+	fi
+
+	if [ "${args[verify_signature]}" = true ] && [ "$from_bundle" = false ] && \
+		! check_sig "$stock_apk" "$pkg_name"; then
 		return 1
 	fi
 	log "${table}: ${version}"
